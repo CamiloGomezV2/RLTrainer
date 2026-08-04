@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RL Trainer</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <h1 class="page-title">General Page</h1>
+
+  <div class="app-shell">
+    <aside class="sidebar">
+      <p class="brand">RL Trainer</p>
+      <nav>
+        <ul>
+          <li><a href="{{ url_for('load') }}">Load environment and agent</a></li>
+          <li><a href="{{ url_for('visualize_environment') }}">Visualize environment</a></li>
+          <li><a href="{{ url_for('visualize_q_table') }}">Visualize Q-table</a></li>
+          <li><a href="{{ url_for('training') }}">Training</a></li>
+        </ul>
+      </nav>
+    </aside>
+
+    <main class="content">
+      <h2>Welcome!</h2>
+      <p>
+        This application allows for the visualization of reinforcement learning
+        agents in different environments.
+      </p>
+    </main>
+  </div>
+</body>
+</html>
