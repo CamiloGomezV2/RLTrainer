@@ -1,103 +1,167 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Load environment and agent — RL Trainer</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-</head>
-<body>
-  <h1 class="page-title page-title--centered">Load environment and agent</h1>
+{% extends "base.html" %}
 
-  <p class="nav-actions">
-    <a class="nav-button" href="{{ url_for('index') }}">Back to main page</a>
+{% block title %}Environment & Agent Setup — RL Trainer{% endblock %}
+
+{% block experiment_context %}
+  {% if config is defined and config %}
+    {% with experiment_status="configuring", experiment_status_label="Configuring" %}
+      {% include "partials/experiment_context.html" %}
+    {% endwith %}
+  {% endif %}
+{% endblock %}
+
+{% block page_title %}Environment & Agent Setup{% endblock %}
+
+{% block page_description %}
+  <p class="page-description">
+    Configure the reinforcement learning experiment by selecting an environment
+    and an agent, then apply the configuration to use it across the workspace.
   </p>
+{% endblock %}
 
-  <div class="load-panel">
-    <div class="load-row">
-      <label class="load-label load-label--blue" for="environment">Select environment:</label>
-      <select id="environment" name="environment" class="load-select">
-        <optgroup label="Toy Text">
-          <option value="Blackjack-v1">Blackjack</option>
-          <option value="Taxi-v3">Taxi</option>
-          <option value="FrozenLake-v1">Frozen Lake</option>
-          <option value="CliffWalking-v0">Cliff Walking</option>
-        </optgroup>
-        <optgroup label="Classic Control">
-          <option value="Acrobot-v1">Acrobot</option>
-          <option value="CartPole-v1">CartPole</option>
-          <option value="MountainCar-v0">Mountain Car</option>
-          <option value="MountainCarContinuous-v0">Continuous Mountain Car</option>
-          <option value="Pendulum-v1">Pendulum</option>
-        </optgroup>
-      </select>
-    </div>
+{% block content %}
+  <form class="setup-form" id="setup-form" novalidate>
+    <section class="setup-card" aria-labelledby="environment-card-title">
+      <header class="setup-card__header">
+        <h2 class="setup-card__title" id="environment-card-title">Environment</h2>
+        <p class="setup-card__subtitle">
+          Choose the Gymnasium environment used for visualization and training.
+        </p>
+      </header>
 
-    <div class="load-row">
-      <label class="load-label load-label--blue" for="agent">Select agent:</label>
-      <select id="agent" name="agent" class="load-select">
-        <optgroup label="Tabular agents">
-          <option value="MC">MC</option>
-          <option value="SARSA">SARSA</option>
-          <option value="Q_learning">Q-learning</option>
-        </optgroup>
-        <optgroup label="DRL agents from stable baselines 3">
-          <option value="drl-sb3">DRL agents from stable baselines 3</option>
-        </optgroup>
-      </select>
-    </div>
+      <div class="setup-field">
+        <label class="label" for="environment">Environment</label>
+        <select id="environment" name="environment" class="select" required>
+          <optgroup label="Toy Text">
+            <option value="Blackjack-v1">Blackjack</option>
+            <option value="Taxi-v3">Taxi</option>
+            <option value="FrozenLake-v1">Frozen Lake</option>
+            <option value="CliffWalking-v0">Cliff Walking</option>
+          </optgroup>
+          <optgroup label="Classic Control">
+            <option value="Acrobot-v1">Acrobot</option>
+            <option value="CartPole-v1">CartPole</option>
+            <option value="MountainCar-v0">Mountain Car</option>
+            <option value="MountainCarContinuous-v0">Continuous Mountain Car</option>
+            <option value="Pendulum-v1">Pendulum</option>
+          </optgroup>
+        </select>
+        <p class="helper-text">Toy Text and Classic Control environments are supported.</p>
+      </div>
 
-    <div class="load-row load-row--hyperparams">
-      <span class="load-label load-label--red">Hyperparameters:</span>
-      <div class="hyperparams-panel">
-        <div class="hyperparam">
-          Number of states:
-          <span id="num-states" class="hyperparam-value"></span>
-        </div>
-        <div class="hyperparam">
-          <label for="learning-rate">Learning rate:</label>
-          <input
-            type="number"
-            id="learning-rate"
-            name="learning_rate"
-            class="hyperparam-input"
-            value="0.1"
-            min="0"
-            max="1"
-            step="0.01"
-          >
-        </div>
-        <div class="hyperparam">
-          Number of actions:
-          <span id="num-actions" class="hyperparam-value"></span>
-        </div>
-        <div class="hyperparam">
-          <label for="exploration-probability">Exploration probability:</label>
-          <input
-            type="number"
-            id="exploration-probability"
-            name="exploration_probability"
-            class="hyperparam-input"
-            value="0.1"
-            min="0"
-            max="1"
-            step="0.01"
-          >
+      <div class="setup-section">
+        <h3 class="setup-section__title">Configuration</h3>
+        <p class="setup-section__hint">
+          These values are derived from the selected environment and cannot be edited.
+        </p>
+        <dl class="setup-metrics">
+          <div class="setup-metric">
+            <dt>Number of states</dt>
+            <dd id="num-states" class="setup-metric__value font-mono">—</dd>
+          </div>
+          <div class="setup-metric">
+            <dt>Number of actions</dt>
+            <dd id="num-actions" class="setup-metric__value font-mono">—</dd>
+          </div>
+        </dl>
+      </div>
+    </section>
+
+    <section class="setup-card" aria-labelledby="agent-card-title">
+      <header class="setup-card__header">
+        <h2 class="setup-card__title" id="agent-card-title">Agent</h2>
+        <p class="setup-card__subtitle">
+          Select the learning algorithm and tune its key hyperparameters.
+        </p>
+      </header>
+
+      <div class="setup-field">
+        <label class="label" for="agent">Algorithm</label>
+        <select id="agent" name="agent" class="select" required>
+          <optgroup label="Tabular agents">
+            <option value="MC">MC</option>
+            <option value="SARSA">SARSA</option>
+            <option value="Q_learning">Q-learning</option>
+          </optgroup>
+          <optgroup label="DRL agents from stable baselines 3">
+            <option value="drl-sb3">DRL agents from stable baselines 3</option>
+          </optgroup>
+        </select>
+        <p class="helper-text">
+          Tabular agents use discrete state-action values. DRL options rely on Stable-Baselines3.
+        </p>
+      </div>
+
+      <div class="setup-section">
+        <h3 class="setup-section__title">Configuration</h3>
+        <div class="setup-params">
+          <div class="setup-field">
+            <label class="label" for="learning-rate">Learning rate</label>
+            <input
+              type="number"
+              id="learning-rate"
+              name="learning_rate"
+              class="input"
+              value="0.1"
+              min="0"
+              max="1"
+              step="0.01"
+              required
+              aria-describedby="learning-rate-help learning-rate-error"
+            >
+            <p id="learning-rate-help" class="helper-text">
+              Step size for value updates. Typical range: 0.01–0.5.
+            </p>
+            <p id="learning-rate-error" class="field-error" role="alert" hidden></p>
+          </div>
+
+          <div class="setup-field">
+            <label class="label" for="exploration-probability">Exploration probability (ε)</label>
+            <input
+              type="number"
+              id="exploration-probability"
+              name="exploration_probability"
+              class="input"
+              value="0.1"
+              min="0"
+              max="1"
+              step="0.01"
+              required
+              aria-describedby="exploration-help exploration-error"
+            >
+            <p id="exploration-help" class="helper-text">
+              Probability of taking a random action. Must be between 0 and 1.
+            </p>
+            <p id="exploration-error" class="field-error" role="alert" hidden></p>
+          </div>
         </div>
       </div>
-    </div>
+    </section>
 
-    <div class="load-actions">
-      <button type="button" class="action-button" id="save-selections">Save selections</button>
-      <button type="button" class="action-button action-button--secondary" id="reset-defaults">Reset defaults</button>
-      <span id="save-status" class="save-status" aria-live="polite"></span>
+    <div class="setup-actions">
+      <button type="submit" class="btn btn--primary" id="save-selections">
+        Apply configuration
+      </button>
+      <button type="button" class="btn btn--secondary" id="reset-defaults">
+        Reset defaults
+      </button>
+      <div
+        id="save-status"
+        class="setup-status"
+        role="status"
+        aria-live="polite"
+        hidden
+      ></div>
     </div>
-  </div>
+  </form>
+{% endblock %}
 
+{% block scripts %}
   <script>
     const envSpaces = {{ env_spaces | tojson }};
     const savedConfig = {{ config | tojson }};
     const defaultConfig = {{ default_config | tojson }};
+    const form = document.getElementById("setup-form");
     const environmentSelect = document.getElementById("environment");
     const agentSelect = document.getElementById("agent");
     const learningRateInput = document.getElementById("learning-rate");
@@ -105,12 +169,14 @@
     const numStates = document.getElementById("num-states");
     const numActions = document.getElementById("num-actions");
     const saveStatus = document.getElementById("save-status");
+    const learningRateError = document.getElementById("learning-rate-error");
+    const explorationError = document.getElementById("exploration-error");
 
     function updateHyperparameters() {
       const spec = envSpaces[environmentSelect.value];
       if (!spec) {
-        numStates.textContent = "";
-        numActions.textContent = "";
+        numStates.textContent = "—";
+        numActions.textContent = "—";
         return;
       }
       numStates.textContent = spec.states;
@@ -122,6 +188,7 @@
       agentSelect.value = config.agent;
       learningRateInput.value = config.learning_rate;
       explorationInput.value = config.exploration_probability;
+      clearFieldErrors();
       updateHyperparameters();
     }
 
@@ -134,21 +201,95 @@
       };
     }
 
-    function setStatus(message) {
-      saveStatus.textContent = message;
+    function setStatus(message, type) {
+      saveStatus.hidden = !message;
+      saveStatus.textContent = message || "";
+      saveStatus.classList.remove("setup-status--success", "setup-status--error");
+      if (type) {
+        saveStatus.classList.add(`setup-status--${type}`);
+      }
     }
 
-    async function saveConfig() {
+    function setFieldError(input, errorEl, message) {
+      const invalid = Boolean(message);
+      input.classList.toggle("input--invalid", invalid);
+      input.setAttribute("aria-invalid", invalid ? "true" : "false");
+      errorEl.hidden = !invalid;
+      errorEl.textContent = message || "";
+    }
+
+    function clearFieldErrors() {
+      setFieldError(learningRateInput, learningRateError, "");
+      setFieldError(explorationInput, explorationError, "");
+    }
+
+    function validateUnitInterval(value, label) {
+      if (value === "" || value === null || Number.isNaN(Number(value))) {
+        return `${label} is required and must be a number.`;
+      }
+      const number = Number(value);
+      if (number < 0 || number > 1) {
+        return `${label} must be between 0 and 1.`;
+      }
+      return "";
+    }
+
+    function validateForm() {
+      const learningRateMessage = validateUnitInterval(
+        learningRateInput.value,
+        "Learning rate"
+      );
+      const explorationMessage = validateUnitInterval(
+        explorationInput.value,
+        "Exploration probability"
+      );
+
+      setFieldError(learningRateInput, learningRateError, learningRateMessage);
+      setFieldError(explorationInput, explorationError, explorationMessage);
+
+      return !learningRateMessage && !explorationMessage;
+    }
+
+    async function saveConfig(event) {
+      if (event) {
+        event.preventDefault();
+      }
+
+      if (!validateForm()) {
+        setStatus("Please fix the highlighted fields before applying.", "error");
+        if (window.ExperimentContext) {
+          ExperimentContext.setStatus("error", "Error");
+        }
+        return;
+      }
+
       const response = await fetch("{{ url_for('api_config') }}", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(currentConfig()),
       });
+
+      let data = {};
+      try {
+        data = await response.json();
+      } catch (error) {
+        data = {};
+      }
+
       if (!response.ok) {
-        setStatus("Could not save selections.");
+        setStatus(data.error || "Could not apply configuration.", "error");
+        if (window.ExperimentContext) {
+          ExperimentContext.setStatus("error", "Error");
+        }
         return;
       }
-      setStatus("Selections saved.");
+
+      if (window.ExperimentContext) {
+        ExperimentContext.setEnvironment(data.environment, data.environment_label);
+        ExperimentContext.setAgent(data.agent, data.agent_label);
+        ExperimentContext.setStatus("ready", "Ready");
+      }
+      setStatus("Configuration applied. It is ready to use in Visualization and Training.", "success");
     }
 
     async function resetDefaults() {
@@ -157,17 +298,62 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });
+
+      let data = {};
+      try {
+        data = await response.json();
+      } catch (error) {
+        data = {};
+      }
+
       if (!response.ok) {
-        setStatus("Could not reset defaults.");
+        setStatus(data.error || "Could not reset defaults.", "error");
+        if (window.ExperimentContext) {
+          ExperimentContext.setStatus("error", "Error");
+        }
         return;
       }
-      setStatus("Defaults restored.");
+
+      if (window.ExperimentContext) {
+        ExperimentContext.setEnvironment(data.environment, data.environment_label);
+        ExperimentContext.setAgent(data.agent, data.agent_label);
+        ExperimentContext.setStatus("ready", "Ready");
+      }
+      setStatus("Defaults restored.", "success");
     }
 
     applyConfig(savedConfig);
-    environmentSelect.addEventListener("change", updateHyperparameters);
-    document.getElementById("save-selections").addEventListener("click", saveConfig);
+    environmentSelect.addEventListener("change", () => {
+      updateHyperparameters();
+      setStatus("", null);
+      if (window.ExperimentContext) {
+        const selected = environmentSelect.options[environmentSelect.selectedIndex];
+        ExperimentContext.setEnvironment(environmentSelect.value, selected ? selected.textContent : environmentSelect.value);
+        ExperimentContext.setStatus("configuring", "Configuring");
+      }
+    });
+    agentSelect.addEventListener("change", () => {
+      if (window.ExperimentContext) {
+        const selected = agentSelect.options[agentSelect.selectedIndex];
+        ExperimentContext.setAgent(agentSelect.value, selected ? selected.textContent.trim() : agentSelect.value);
+        ExperimentContext.setStatus("configuring", "Configuring");
+      }
+    });
+    learningRateInput.addEventListener("input", () => {
+      setFieldError(
+        learningRateInput,
+        learningRateError,
+        validateUnitInterval(learningRateInput.value, "Learning rate")
+      );
+    });
+    explorationInput.addEventListener("input", () => {
+      setFieldError(
+        explorationInput,
+        explorationError,
+        validateUnitInterval(explorationInput.value, "Exploration probability")
+      );
+    });
+    form.addEventListener("submit", saveConfig);
     document.getElementById("reset-defaults").addEventListener("click", resetDefaults);
   </script>
-</body>
-</html>
+{% endblock %}

@@ -1,82 +1,183 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Visualize environment — RL Trainer</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-</head>
-<body>
-  <h1 class="page-title page-title--centered">Visualize environment</h1>
+{% extends "base.html" %}
 
-  <p class="nav-actions">
-    <a class="nav-button" href="{{ url_for('index') }}">Back to main page</a>
+{% block title %}Visualization — RL Trainer{% endblock %}
+
+{% block page_title %}Visualization{% endblock %}
+
+{% block page_description %}
+  <p class="page-description">
+    Watch the agent interact with the configured environment. Run a full episode
+    or step through actions one at a time.
   </p>
+{% endblock %}
 
-  <div class="viz-panel">
-    <div class="viz-config">
-      <span>Environment: <strong id="config-environment">{{ config.environment_label }}</strong></span>
-      <span>Agent: <strong id="config-agent">{{ config.agent_label }}</strong></span>
-      <span>Learning rate: <strong id="config-lr">{{ config.learning_rate }}</strong></span>
-      <span>Exploration: <strong id="config-eps">{{ config.exploration_probability }}</strong></span>
+{% block content %}
+  <div class="viz-workspace">
+    <div class="viz-params">
+      <div class="viz-params__item">
+        <span class="viz-params__label">Learning rate</span>
+        <strong id="config-lr">{{ config.learning_rate }}</strong>
+      </div>
+      <div class="viz-params__item">
+        <span class="viz-params__label">Exploration</span>
+        <strong id="config-eps">{{ config.exploration_probability }}</strong>
+      </div>
     </div>
 
-    <div class="viz-status">
-      <span id="timestep-label">Timestep 0 / {{ config.max_timesteps }}</span>
-      <span id="reward-label">Accumulated reward: 0</span>
-    </div>
+    <div class="viz-layout">
+      <section class="viz-stage" aria-label="Environment visualization">
+        <div class="viz-render" id="env-render">
+          <span class="viz-render-placeholder">Loading environment…</span>
+          <img id="env-frame" class="viz-frame" alt="Environment render" hidden>
+        </div>
 
-    <div class="viz-render" id="env-render" aria-label="Environment render">
-      <span class="viz-render-placeholder">Loading environment…</span>
-      <img id="env-frame" class="viz-frame" alt="Environment render" hidden>
-    </div>
+        <div class="viz-toolbar">
+          <button type="button" class="btn btn--primary" id="run-episode">
+            <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="6 3 20 12 6 21 6 3"></polygon>
+              <line x1="20" y1="3" x2="20" y2="21"></line>
+            </svg>
+            Run episode
+          </button>
+          <button type="button" class="btn btn--secondary" id="run-action">
+            <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="6 3 20 12 6 21 6 3"></polygon>
+            </svg>
+            Run an action
+          </button>
+          <div class="viz-toolbar__field">
+            <label class="label" for="action-to-run">Action to run</label>
+            <select id="action-to-run" class="select" aria-label="Action to run"></select>
+            <input
+              type="number"
+              id="continuous-action"
+              class="input"
+              step="0.01"
+              hidden
+              aria-label="Continuous action value"
+            >
+          </div>
+        </div>
+      </section>
 
-    <div class="viz-controls">
-      <div class="viz-control">
-        <button type="button" class="viz-btn" id="run-episode" aria-label="Run episode">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <polygon points="4,4 12,12 4,20"></polygon>
-            <polygon points="12,4 20,12 12,20"></polygon>
-          </svg>
-        </button>
-        <span class="viz-control-label">Run episode</span>
-      </div>
+      <aside class="viz-sidebar">
+        <section class="viz-card" aria-labelledby="env-info-title">
+          <h2 class="viz-card__title" id="env-info-title">Environment Info</h2>
+          <dl class="viz-facts">
+            <div class="viz-fact">
+              <dt>State</dt>
+              <dd id="info-state" class="font-mono">—</dd>
+            </div>
+            <div class="viz-fact">
+              <dt>Action</dt>
+              <dd id="info-action">—</dd>
+            </div>
+            <div class="viz-fact">
+              <dt>Reward</dt>
+              <dd id="info-reward" class="font-mono">—</dd>
+            </div>
+            <div class="viz-fact">
+              <dt>Timestep</dt>
+              <dd id="timestep-label" class="font-mono">0 / {{ config.max_timesteps }}</dd>
+            </div>
+            <div class="viz-fact">
+              <dt>Accumulated reward</dt>
+              <dd id="reward-label" class="font-mono">0</dd>
+            </div>
+          </dl>
 
-      <div class="viz-control">
-        <button type="button" class="viz-btn" id="run-action" aria-label="Run an action">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <polygon points="6,4 20,12 6,20"></polygon>
-          </svg>
-        </button>
-        <span class="viz-control-label">Run an action</span>
-      </div>
-
-      <div class="viz-control">
-        <select id="action-to-run" class="viz-action-select" aria-label="Action to run"></select>
-        <input
-          type="number"
-          id="continuous-action"
-          class="viz-action-select"
-          step="0.01"
-          hidden
-        >
-        <span class="viz-control-label">Action to run</span>
-      </div>
+          <div class="viz-stepper">
+            <button type="button" class="btn btn--secondary" id="prev-frame" disabled>
+              Previous
+            </button>
+            <button type="button" class="btn btn--secondary" id="next-frame" disabled>
+              Next
+            </button>
+          </div>
+          <p class="helper-text" id="frame-position">No episode frames yet</p>
+        </section>
+      </aside>
     </div>
   </div>
+{% endblock %}
 
+{% block scripts %}
   <script>
     const config = {{ config | tojson }};
+    const ACTION_LABELS = {
+      "Blackjack-v1": ["Stick", "Hit"],
+      "Taxi-v3": ["South", "North", "East", "West", "Pickup", "Dropoff"],
+      "FrozenLake-v1": ["Left", "Down", "Right", "Up"],
+      "CliffWalking-v0": ["Up", "Right", "Down", "Left"],
+      "Acrobot-v1": ["Torque −1", "Torque 0", "Torque +1"],
+      "CartPole-v1": ["Left", "Right"],
+      "MountainCar-v0": ["Left", "Neutral", "Right"],
+    };
+
     const actionSelect = document.getElementById("action-to-run");
     const continuousAction = document.getElementById("continuous-action");
     const timestepLabel = document.getElementById("timestep-label");
     const rewardLabel = document.getElementById("reward-label");
+    const infoState = document.getElementById("info-state");
+    const infoAction = document.getElementById("info-action");
+    const infoReward = document.getElementById("info-reward");
+    const framePosition = document.getElementById("frame-position");
     const envRender = document.getElementById("env-render");
     const envFrame = document.getElementById("env-frame");
     const runEpisodeButton = document.getElementById("run-episode");
     const runActionButton = document.getElementById("run-action");
+    const prevFrameButton = document.getElementById("prev-frame");
+    const nextFrameButton = document.getElementById("next-frame");
     const FRAME_DELAY_MS = 120;
+
     let animationTimer = null;
+    let episodeFrames = [];
+    let frameIndex = -1;
+    let maxTimesteps = config.max_timesteps || 100;
+
+    function setRunStatus(state, label) {
+      if (window.ExperimentContext) {
+        ExperimentContext.setStatus(state, label);
+      }
+    }
+
+    function formatObservation(observation) {
+      if (observation === undefined || observation === null) {
+        return "—";
+      }
+      if (typeof observation === "number") {
+        return String(observation);
+      }
+      return JSON.stringify(observation);
+    }
+
+    function formatAction(action) {
+      if (action === undefined || action === null) {
+        return "—";
+      }
+      if (typeof action === "number" && Number.isInteger(action)) {
+        const labels = ACTION_LABELS[config.environment];
+        if (labels && labels[action] !== undefined) {
+          return `${labels[action]} (${action})`;
+        }
+        return `Action ${action}`;
+      }
+      return String(action);
+    }
+
+    function formatReward(reward) {
+      if (reward === undefined || reward === null) {
+        return "—";
+      }
+      const value = Number(reward);
+      if (Number.isNaN(value)) {
+        return String(reward);
+      }
+      if (value > 0) {
+        return `+${value}`;
+      }
+      return String(value);
+    }
 
     function selectedActionPayload() {
       const value = actionSelect.value;
@@ -106,10 +207,11 @@
       if (actionSpace.type === "discrete") {
         continuousAction.hidden = true;
         actionSelect.hidden = false;
+        const labels = ACTION_LABELS[config.environment] || [];
         for (let i = 0; i < actionSpace.n; i++) {
           const option = document.createElement("option");
           option.value = String(i);
-          option.textContent = `Action ${i}`;
+          option.textContent = labels[i] ? `${labels[i]} (${i})` : `Action ${i}`;
           actionSelect.appendChild(option);
         }
         return;
@@ -149,9 +251,43 @@
       }
     }
 
-    function updateStatus(timestep, maxTimesteps, accumulatedReward) {
-      timestepLabel.textContent = `Timestep ${timestep} / ${maxTimesteps}`;
-      rewardLabel.textContent = `Accumulated reward: ${accumulatedReward}`;
+    function updateStepper() {
+      const hasFrames = episodeFrames.length > 0;
+      prevFrameButton.disabled = !hasFrames || frameIndex <= 0;
+      nextFrameButton.disabled = !hasFrames || frameIndex >= episodeFrames.length - 1;
+      if (!hasFrames) {
+        framePosition.textContent = "No episode frames yet";
+        return;
+      }
+      framePosition.textContent = `Frame ${frameIndex + 1} of ${episodeFrames.length}`;
+    }
+
+    function updateInfo(payload) {
+      if (!payload) {
+        return;
+      }
+      maxTimesteps = payload.max_timesteps || maxTimesteps;
+      const timestep = payload.timestep ?? 0;
+      const accumulated = payload.accumulated_reward ?? 0;
+      timestepLabel.textContent = `${timestep} / ${maxTimesteps}`;
+      rewardLabel.textContent = String(accumulated);
+      infoState.textContent = formatObservation(payload.observation);
+      infoAction.textContent = formatAction(payload.action);
+      infoReward.textContent = formatReward(payload.reward);
+    }
+
+    function showFrameAt(index) {
+      if (index < 0 || index >= episodeFrames.length) {
+        return;
+      }
+      frameIndex = index;
+      const frame = episodeFrames[frameIndex];
+      updateInfo({
+        ...frame,
+        max_timesteps: maxTimesteps,
+      });
+      showFrame(frame.image);
+      updateStepper();
     }
 
     function stopAnimation() {
@@ -161,20 +297,22 @@
       }
     }
 
-    function playFrames(frames, maxTimesteps) {
+    function playFrames(frames) {
       stopAnimation();
-      let index = 0;
+      episodeFrames = frames;
+      frameIndex = 0;
+      setRunStatus("ready", "Ready");
 
       function showNext() {
-        const frame = frames[index];
-        updateStatus(frame.timestep, maxTimesteps, frame.accumulated_reward);
-        showFrame(frame.image);
-        index += 1;
-        if (index < frames.length) {
+        showFrameAt(frameIndex);
+        if (frameIndex < episodeFrames.length - 1) {
+          frameIndex += 1;
           animationTimer = setTimeout(showNext, FRAME_DELAY_MS);
         } else {
+          setRunStatus("ready", "Ready");
           runEpisodeButton.disabled = false;
           runActionButton.disabled = false;
+          updateStepper();
         }
       }
 
@@ -182,21 +320,34 @@
     }
 
     async function loadInitialState() {
+      setRunStatus("ready", "Ready");
       const response = await fetch("{{ url_for('api_environment_initial') }}");
       const data = await response.json();
       if (!response.ok) {
         showMessage(data.error || "Could not load environment.");
+        setRunStatus("error", "Error");
         return;
       }
-      updateStatus(data.timestep, data.max_timesteps, data.accumulated_reward);
+      episodeFrames = [];
+      frameIndex = -1;
+      updateInfo({
+        ...data,
+        action: null,
+        reward: null,
+      });
       showFrame(data.image);
+      updateStepper();
+      setRunStatus("ready", "Ready");
     }
 
     async function runEpisode() {
       stopAnimation();
       runEpisodeButton.disabled = true;
       runActionButton.disabled = true;
+      prevFrameButton.disabled = true;
+      nextFrameButton.disabled = true;
       showMessage("Running episode…");
+      setRunStatus("ready", "Ready");
 
       const response = await fetch("{{ url_for('api_environment_run_episode') }}", {
         method: "POST",
@@ -205,16 +356,20 @@
       const data = await response.json();
       if (!response.ok) {
         showMessage(data.error || "Could not run episode.");
+        setRunStatus("error", "Error");
         runEpisodeButton.disabled = false;
         runActionButton.disabled = false;
+        updateStepper();
         return;
       }
-      playFrames(data.frames, data.max_timesteps);
+      maxTimesteps = data.max_timesteps || maxTimesteps;
+      playFrames(data.frames);
     }
 
     async function runAction() {
       stopAnimation();
       runActionButton.disabled = true;
+      setRunStatus("ready", "Ready");
 
       const response = await fetch("{{ url_for('api_environment_run_action') }}", {
         method: "POST",
@@ -224,22 +379,35 @@
       const data = await response.json();
       if (!response.ok) {
         showMessage(data.error || "Could not run action.");
+        setRunStatus("error", "Error");
         runActionButton.disabled = false;
         return;
       }
 
-      updateStatus(data.timestep, data.max_timesteps, data.accumulated_reward);
+      episodeFrames = [];
+      frameIndex = -1;
+      updateInfo(data);
       showFrame(data.image);
+      updateStepper();
 
       if (data.reset_after_done && data.next_image) {
         setTimeout(() => {
-          updateStatus(data.timestep, data.max_timesteps, 0);
+          updateInfo({
+            timestep: data.timestep,
+            max_timesteps: data.max_timesteps,
+            accumulated_reward: 0,
+            observation: data.next_observation,
+            action: null,
+            reward: null,
+          });
           showFrame(data.next_image);
+          setRunStatus("ready", "Ready");
           runActionButton.disabled = false;
         }, FRAME_DELAY_MS);
         return;
       }
 
+      setRunStatus("ready", "Ready");
       runActionButton.disabled = false;
     }
 
@@ -251,7 +419,8 @@
     });
     runEpisodeButton.addEventListener("click", runEpisode);
     runActionButton.addEventListener("click", runAction);
+    prevFrameButton.addEventListener("click", () => showFrameAt(frameIndex - 1));
+    nextFrameButton.addEventListener("click", () => showFrameAt(frameIndex + 1));
     loadInitialState();
   </script>
-</body>
-</html>
+{% endblock %}

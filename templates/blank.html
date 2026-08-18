@@ -1,16 +1,7 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{{ title }} — RL Trainer</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-</head>
-<body>
-  <h1 class="page-title">{{ title }}</h1>
+{% extends "base.html" %}
 
-  <p class="nav-actions">
-    <a class="nav-button" href="{{ url_for('index') }}">Back to main page</a>
-  </p>
-</body>
-</html>
+{% block title %}{{ title }} — RL Trainer{% endblock %}
+
+{% block page_title %}{{ title }}{% endblock %}
+
+{% block content %}{% endblock %}

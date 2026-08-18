@@ -16,6 +16,7 @@ from gymnasium.spaces import Box, Discrete, Tuple
 
 DEFAULT_MAX_TIMESTEPS = 100
 DEFAULT_GAMMA = 0.99
+DEFAULT_TRAINING_EPISODES = 100
 
 TABULAR_AGENTS = {
     "MC": MC,
@@ -125,7 +126,7 @@ def create_agent(agent_name: str, env: gym.Env, config: dict):
     parameters = {
         "nS": observation_space_size(env.observation_space),
         "nA": int(env.action_space.n),
-        "gamma": DEFAULT_GAMMA,
+        "gamma": float(config.get("discount_factor", DEFAULT_GAMMA)),
         "epsilon": float(config["exploration_probability"]),
         "alpha": float(config["learning_rate"]),
         "first_visit": True,
@@ -141,6 +142,7 @@ def get_or_create_runtime(session, config: dict, need_agent: bool = False) -> di
         config["agent"],
         float(config["learning_rate"]),
         float(config["exploration_probability"]),
+        float(config.get("discount_factor", DEFAULT_GAMMA)),
     )
 
     if runtime is not None and runtime.get("fingerprint") == fingerprint:
@@ -344,4 +346,96 @@ def run_until_max_timesteps(runtime: dict[str, Any], max_timesteps: int = DEFAUL
         "timestep": max_timesteps,
         "max_timesteps": max_timesteps,
         "accumulated_reward": frames[-1]["accumulated_reward"],
+    }
+
+
+def get_q_table(runtime: dict[str, Any]) -> dict:
+    """Serialize the tabular agent's Q-table for analysis views (read-only)."""
+    agent = runtime.get("agent")
+    if agent is None:
+        raise ValueError(
+            "Q-table analysis requires a tabular agent (MC, SARSA, or Q-learning)."
+        )
+    if not hasattr(agent, "Q"):
+        raise ValueError("The current agent does not expose a Q-table.")
+
+    q_values = np.asarray(agent.Q, dtype=float)
+    if q_values.ndim != 2:
+        raise ValueError("Unexpected Q-table shape.")
+
+    return {
+        "n_states": int(q_values.shape[0]),
+        "n_actions": int(q_values.shape[1]),
+        "q_table": q_values.tolist(),
+    }
+
+
+def apply_agent_hyperparameters(runtime: dict[str, Any], config: dict) -> None:
+    """Update in-memory tabular agent hyperparameters from the active config."""
+    agent = runtime.get("agent")
+    if agent is None:
+        return
+    agent.epsilon = float(config["exploration_probability"])
+    agent.gamma = float(config.get("discount_factor", DEFAULT_GAMMA))
+    if hasattr(agent, "alpha"):
+        agent.alpha = float(config["learning_rate"])
+    agent.parameters["epsilon"] = agent.epsilon
+    agent.parameters["gamma"] = agent.gamma
+    if "alpha" in agent.parameters:
+        agent.parameters["alpha"] = float(config["learning_rate"])
+
+
+def run_training_episode(
+    runtime: dict[str, Any],
+    max_timesteps: int = DEFAULT_MAX_TIMESTEPS,
+) -> dict:
+    """
+    Run one training episode with the tabular agent.
+
+    Uses the same decision / step / update flow as the existing visualization
+    runners, without collecting render frames.
+    """
+    env = runtime["env"]
+    agent = runtime.get("agent")
+    if agent is None:
+        raise ValueError("Training currently requires a tabular agent.")
+
+    observation, info = env.reset()
+    agent.restart()
+    state = encode_observation(observation, env.observation_space)
+    agent.states.append(state)
+
+    episode_reward = 0.0
+    steps = 0
+    done = False
+
+    for _ in range(max_timesteps):
+        action = agent.make_decision()
+        agent.actions.append(
+            action if isinstance(action, (int, np.integer)) else int(action)
+        )
+
+        observation, reward, terminated, truncated, info = env.step(action)
+        done = bool(terminated or truncated)
+        next_state = encode_observation(observation, env.observation_space)
+
+        agent.update(next_state, reward, done)
+        agent.rewards.append(reward)
+        agent.dones.append(done)
+
+        episode_reward += float(reward)
+        steps += 1
+
+        if done:
+            break
+        agent.states.append(next_state)
+
+    runtime["timestep"] = steps
+    runtime["accumulated_reward"] = episode_reward
+
+    return {
+        "episode_reward": episode_reward,
+        "steps": steps,
+        "done": done,
+        "max_timesteps": max_timesteps,
     }

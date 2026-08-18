@@ -1,0 +1,349 @@
+{% extends "base.html" %}
+
+{% block title %}Agent Analysis — RL Trainer{% endblock %}
+
+{% block page_title %}Agent Analysis{% endblock %}
+
+{% block page_description %}
+  <p class="page-description">
+    Inspect learned representations for the configured agent. Additional analysis
+    views can be added here as the platform grows beyond tabular methods.
+  </p>
+{% endblock %}
+
+{% block content %}
+  <div class="analysis-workspace">
+    <section class="analysis-card" aria-labelledby="analysis-card-title">
+      <header class="analysis-card__header">
+        <h2 class="analysis-card__title" id="analysis-card-title">Analysis</h2>
+      </header>
+
+      <div class="analysis-tabs" role="tablist" aria-label="Analysis views">
+        <button
+          type="button"
+          class="analysis-tab is-active"
+          role="tab"
+          id="tab-q-table"
+          aria-selected="true"
+          aria-controls="panel-q-table"
+          data-analysis-tab="q-table"
+        >
+          Q-Table
+        </button>
+        <button
+          type="button"
+          class="analysis-tab"
+          role="tab"
+          id="tab-policy"
+          aria-selected="false"
+          aria-controls="panel-policy"
+          data-analysis-tab="policy"
+        >
+          Policy
+        </button>
+        <button
+          type="button"
+          class="analysis-tab"
+          role="tab"
+          id="tab-value"
+          aria-selected="false"
+          aria-controls="panel-value"
+          data-analysis-tab="value"
+        >
+          Value Function
+        </button>
+        <button
+          type="button"
+          class="analysis-tab"
+          role="tab"
+          id="tab-metrics"
+          aria-selected="false"
+          aria-controls="panel-metrics"
+          data-analysis-tab="metrics"
+        >
+          Metrics
+        </button>
+      </div>
+
+      <div
+        class="analysis-panel is-active"
+        role="tabpanel"
+        id="panel-q-table"
+        aria-labelledby="tab-q-table"
+        data-analysis-panel="q-table"
+      >
+        <div class="analysis-panel__intro">
+          <h3 class="analysis-panel__title">Q-Table</h3>
+          <p class="analysis-panel__subtitle">
+            Action-value estimates <span class="font-mono">Q(s, a)</span> for each
+            state-action pair. Values update as the agent learns.
+          </p>
+        </div>
+
+        <div id="q-table-status" class="analysis-status" role="status" aria-live="polite">
+          Loading Q-table…
+        </div>
+
+        <div class="analysis-table-shell" id="q-table-shell" hidden>
+          <div class="analysis-table-scroll" tabindex="0">
+            <table class="analysis-table" id="q-table">
+              <caption class="sr-only">Q-table of state-action values</caption>
+              <thead></thead>
+              <tbody id="q-table-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div
+        class="analysis-panel"
+        role="tabpanel"
+        id="panel-policy"
+        aria-labelledby="tab-policy"
+        data-analysis-panel="policy"
+        hidden
+      >
+        <div class="analysis-unavailable">
+          <h3 class="analysis-panel__title">Policy</h3>
+          <p class="analysis-unavailable__badge">Unavailable</p>
+          <p class="text-secondary">
+            Policy visualization is not implemented yet. This tab is reserved for
+            future agent analysis views.
+          </p>
+        </div>
+      </div>
+
+      <div
+        class="analysis-panel"
+        role="tabpanel"
+        id="panel-value"
+        aria-labelledby="tab-value"
+        data-analysis-panel="value"
+        hidden
+      >
+        <div class="analysis-unavailable">
+          <h3 class="analysis-panel__title">Value Function</h3>
+          <p class="analysis-unavailable__badge">Unavailable</p>
+          <p class="text-secondary">
+            Value-function visualization is not implemented yet. This tab is reserved
+            for future agent analysis views.
+          </p>
+        </div>
+      </div>
+
+      <div
+        class="analysis-panel"
+        role="tabpanel"
+        id="panel-metrics"
+        aria-labelledby="tab-metrics"
+        data-analysis-panel="metrics"
+        hidden
+      >
+        <div class="analysis-unavailable">
+          <h3 class="analysis-panel__title">Metrics</h3>
+          <p class="analysis-unavailable__badge">Unavailable</p>
+          <p class="text-secondary">
+            Training and evaluation metrics are not implemented yet. This tab is
+            reserved for future agent analysis views.
+          </p>
+        </div>
+      </div>
+    </section>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    const config = {{ config | tojson }};
+    const ACTION_LABELS = {
+      "Blackjack-v1": ["Stick", "Hit"],
+      "Taxi-v3": ["South", "North", "East", "West", "Pickup", "Dropoff"],
+      "FrozenLake-v1": ["Left", "Down", "Right", "Up"],
+      "CliffWalking-v0": ["Up", "Right", "Down", "Left"],
+      "Acrobot-v1": ["Torque −1", "Torque 0", "Torque +1"],
+      "CartPole-v1": ["Left", "Right"],
+      "MountainCar-v0": ["Left", "Neutral", "Right"],
+    };
+
+    const tabs = Array.from(document.querySelectorAll("[data-analysis-tab]"));
+    const panels = Array.from(document.querySelectorAll("[data-analysis-panel]"));
+    const statusEl = document.getElementById("q-table-status");
+    const tableShell = document.getElementById("q-table-shell");
+    const tableBody = document.getElementById("q-table-body");
+
+    function formatQ(value) {
+      const number = Number(value);
+      if (Number.isNaN(number)) {
+        return "—";
+      }
+      if (Object.is(number, -0)) {
+        return "0.00";
+      }
+      const abs = Math.abs(number);
+      if (abs !== 0 && abs < 0.01) {
+        return number.toExponential(2);
+      }
+      return number.toFixed(2);
+    }
+
+    function actionLabel(index) {
+      const labels = ACTION_LABELS[config.environment] || [];
+      return labels[index] || `A${index}`;
+    }
+
+    function setStatus(message, type) {
+      statusEl.hidden = !message;
+      statusEl.textContent = message || "";
+      statusEl.classList.remove(
+        "analysis-status--error",
+        "analysis-status--info",
+        "analysis-status--success"
+      );
+      if (type) {
+        statusEl.classList.add(`analysis-status--${type}`);
+      }
+    }
+
+    function activateTab(tabId) {
+      tabs.forEach((tab) => {
+        const selected = tab.dataset.analysisTab === tabId;
+        tab.classList.toggle("is-active", selected);
+        tab.setAttribute("aria-selected", selected ? "true" : "false");
+        tab.tabIndex = selected ? 0 : -1;
+      });
+
+      panels.forEach((panel) => {
+        const selected = panel.dataset.analysisPanel === tabId;
+        panel.classList.toggle("is-active", selected);
+        panel.hidden = !selected;
+      });
+    }
+
+    function renderQTable(payload) {
+      const qTable = payload.q_table || [];
+      const nActions = payload.n_actions || 0;
+      const thead = document.querySelector("#q-table thead");
+
+      thead.innerHTML = "";
+
+      const actionRow = document.createElement("tr");
+      const stateCorner = document.createElement("th");
+      stateCorner.scope = "col";
+      stateCorner.rowSpan = 2;
+      stateCorner.className = "analysis-table__corner";
+      stateCorner.textContent = "State";
+      actionRow.appendChild(stateCorner);
+
+      const actionGroup = document.createElement("th");
+      actionGroup.scope = "colgroup";
+      actionGroup.colSpan = Math.max(nActions, 1);
+      actionGroup.className = "analysis-table__action-group";
+      actionGroup.textContent = "Action";
+      actionRow.appendChild(actionGroup);
+      thead.appendChild(actionRow);
+
+      const labelRow = document.createElement("tr");
+      labelRow.id = "q-table-head";
+      for (let action = 0; action < nActions; action += 1) {
+        const th = document.createElement("th");
+        th.scope = "col";
+        th.textContent = actionLabel(action);
+        labelRow.appendChild(th);
+      }
+      thead.appendChild(labelRow);
+
+      tableBody.innerHTML = "";
+      qTable.forEach((row, state) => {
+        const tr = document.createElement("tr");
+        const th = document.createElement("th");
+        th.scope = "row";
+        th.textContent = String(state);
+        tr.appendChild(th);
+
+        let bestValue = -Infinity;
+        row.forEach((value) => {
+          const number = Number(value);
+          if (!Number.isNaN(number) && number > bestValue) {
+            bestValue = number;
+          }
+        });
+
+        row.forEach((value) => {
+          const td = document.createElement("td");
+          const number = Number(value);
+          td.textContent = formatQ(value);
+          td.className = "font-mono";
+          if (!Number.isNaN(number) && number === bestValue) {
+            td.classList.add("is-best");
+          }
+          tr.appendChild(td);
+        });
+
+        tableBody.appendChild(tr);
+      });
+
+      tableShell.hidden = false;
+      setStatus(
+        `Showing ${payload.n_states} states × ${payload.n_actions} actions for ${payload.agent_label}.`,
+        "info"
+      );
+    }
+
+    async function loadQTable() {
+      setStatus("Loading Q-table…", "info");
+      tableShell.hidden = true;
+
+      const response = await fetch("{{ url_for('api_agent_q_table') }}");
+      let data = {};
+      try {
+        data = await response.json();
+      } catch (error) {
+        data = {};
+      }
+
+      if (!response.ok) {
+        setStatus(data.error || "Could not load Q-table.", "error");
+        if (window.ExperimentContext) {
+          ExperimentContext.setStatus("error", "Error");
+        }
+        return;
+      }
+
+      if (window.ExperimentContext) {
+        ExperimentContext.setEnvironment(data.environment, data.environment_label);
+        ExperimentContext.setAgent(data.agent, data.agent_label);
+        ExperimentContext.setStatus("ready", "Ready");
+      }
+      renderQTable(data);
+    }
+
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => activateTab(tab.dataset.analysisTab));
+    });
+
+    document.querySelector(".analysis-tabs").addEventListener("keydown", (event) => {
+      const currentIndex = tabs.findIndex((tab) => tab.classList.contains("is-active"));
+      if (currentIndex < 0) {
+        return;
+      }
+      let nextIndex = currentIndex;
+      if (event.key === "ArrowRight") {
+        nextIndex = (currentIndex + 1) % tabs.length;
+      } else if (event.key === "ArrowLeft") {
+        nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+      } else if (event.key === "Home") {
+        nextIndex = 0;
+      } else if (event.key === "End") {
+        nextIndex = tabs.length - 1;
+      } else {
+        return;
+      }
+      event.preventDefault();
+      tabs[nextIndex].focus();
+      activateTab(tabs[nextIndex].dataset.analysisTab);
+    });
+
+    activateTab("q-table");
+    loadQTable();
+  </script>
+{% endblock %}

@@ -1,0 +1,380 @@
+{% extends "base.html" %}
+
+{% block title %}Training — RL Trainer{% endblock %}
+
+{% block page_title %}Training{% endblock %}
+
+{% block page_description %}
+  <p class="page-description">
+    Configure hyperparameters, run training episodes for the selected tabular agent,
+    and monitor episode reward as learning progresses.
+  </p>
+{% endblock %}
+
+{% block content %}
+  <div class="training-workspace">
+    <section class="training-card" aria-labelledby="training-config-title">
+      <header class="training-card__header">
+        <h2 class="training-card__title" id="training-config-title">Training Configuration</h2>
+        <p class="training-card__subtitle">
+          Set the episode budget and learning hyperparameters before starting a run.
+        </p>
+      </header>
+
+      <form class="training-form" id="training-form" novalidate>
+        <div class="training-fields">
+          <div class="setup-field">
+            <label class="label" for="episodes">Episodes</label>
+            <input
+              type="number"
+              id="episodes"
+              name="episodes"
+              class="input"
+              value="{{ config.training_episodes or default_episodes }}"
+              min="1"
+              step="1"
+              required
+            >
+          </div>
+
+          <div class="setup-field">
+            <label class="label" for="learning-rate">Learning Rate</label>
+            <input
+              type="number"
+              id="learning-rate"
+              name="learning_rate"
+              class="input"
+              value="{{ config.learning_rate }}"
+              min="0"
+              max="1"
+              step="0.01"
+              required
+            >
+          </div>
+
+          <div class="setup-field">
+            <label class="label" for="discount-factor">Discount Factor</label>
+            <input
+              type="number"
+              id="discount-factor"
+              name="discount_factor"
+              class="input"
+              value="{{ config.discount_factor }}"
+              min="0"
+              max="1"
+              step="0.01"
+              required
+            >
+          </div>
+
+          <div class="setup-field">
+            <label class="label" for="exploration">Exploration</label>
+            <input
+              type="number"
+              id="exploration"
+              name="exploration_probability"
+              class="input"
+              value="{{ config.exploration_probability }}"
+              min="0"
+              max="1"
+              step="0.01"
+              required
+            >
+          </div>
+        </div>
+
+        <div class="training-actions">
+          <button type="submit" class="btn btn--primary btn--lg" id="start-training">
+            <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="6 3 20 12 6 21 6 3"></polygon>
+            </svg>
+            Start Training
+          </button>
+          <div
+            id="training-feedback"
+            class="setup-status"
+            role="status"
+            aria-live="polite"
+            hidden
+          ></div>
+        </div>
+      </form>
+    </section>
+
+    <section class="training-card" aria-labelledby="training-progress-title">
+      <header class="training-card__header">
+        <h2 class="training-card__title" id="training-progress-title">Training Progress</h2>
+      </header>
+
+      <div class="training-progress">
+        <div class="training-progress__row">
+          <span class="training-progress__label">Episode</span>
+          <span class="training-progress__value font-mono" id="episode-progress">0 / 0</span>
+        </div>
+        <div
+          class="training-progress__track"
+          role="progressbar"
+          id="training-progressbar"
+          aria-valuemin="0"
+          aria-valuemax="0"
+          aria-valuenow="0"
+          aria-label="Training progress"
+        >
+          <div class="training-progress__fill" id="training-progress-fill"></div>
+        </div>
+        <div class="training-progress__status">
+          <span class="viz-status-pill" id="training-status" data-state="idle">
+            <span class="viz-status-pill__dot" aria-hidden="true"></span>
+            <span class="viz-status-pill__label">Idle</span>
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <section class="training-card" aria-labelledby="training-metrics-title">
+      <header class="training-card__header">
+        <h2 class="training-card__title" id="training-metrics-title">Training Metrics</h2>
+        <p class="training-card__subtitle">
+          Episode reward from completed training episodes.
+        </p>
+      </header>
+
+      <div class="training-metrics">
+        <div class="training-metrics__header">
+          <h3 class="training-metrics__chart-title">Episode Reward</h3>
+          <p class="training-metrics__summary font-mono" id="metrics-summary">No data yet</p>
+        </div>
+        <div class="training-chart" id="reward-chart" aria-label="Episode reward chart">
+          <svg class="training-chart__svg" viewBox="0 0 640 240" preserveAspectRatio="none" aria-hidden="true">
+            <line class="training-chart__grid" x1="48" y1="24" x2="48" y2="200"></line>
+            <line class="training-chart__grid" x1="48" y1="200" x2="616" y2="200"></line>
+            <polyline class="training-chart__line" id="reward-line" fill="none" points=""></polyline>
+          </svg>
+          <p class="training-chart__empty" id="chart-empty">
+            Metrics will appear when training produces episode rewards.
+          </p>
+        </div>
+      </div>
+    </section>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    const config = {{ config | tojson }};
+    const form = document.getElementById("training-form");
+    const startButton = document.getElementById("start-training");
+    const feedback = document.getElementById("training-feedback");
+    const episodesInput = document.getElementById("episodes");
+    const learningRateInput = document.getElementById("learning-rate");
+    const discountInput = document.getElementById("discount-factor");
+    const explorationInput = document.getElementById("exploration");
+    const episodeProgress = document.getElementById("episode-progress");
+    const progressBar = document.getElementById("training-progressbar");
+    const progressFill = document.getElementById("training-progress-fill");
+    const trainingStatus = document.getElementById("training-status");
+    const metricsSummary = document.getElementById("metrics-summary");
+    const rewardLine = document.getElementById("reward-line");
+    const chartEmpty = document.getElementById("chart-empty");
+    const formControls = [episodesInput, learningRateInput, discountInput, explorationInput, startButton];
+
+    let episodeRewards = [];
+    let trainingActive = false;
+
+    function setFeedback(message, type) {
+      feedback.hidden = !message;
+      feedback.textContent = message || "";
+      feedback.classList.remove("setup-status--success", "setup-status--error");
+      if (type) {
+        feedback.classList.add(`setup-status--${type}`);
+      }
+    }
+
+    function setStatus(state, label) {
+      const progressState =
+        state === "training" ? "running" :
+        state === "completed" ? "ready" :
+        state === "ready" ? "idle" :
+        state;
+      const progressLabel =
+        label === "Ready" && state === "ready" ? "Idle" : label;
+
+      trainingStatus.dataset.state = progressState;
+      trainingStatus.querySelector(".viz-status-pill__label").textContent = progressLabel;
+
+      if (window.ExperimentContext) {
+        ExperimentContext.setStatus(state, label);
+      }
+    }
+
+    function setControlsDisabled(disabled) {
+      formControls.forEach((control) => {
+        control.disabled = disabled;
+      });
+    }
+
+    function validateConfig() {
+      const episodes = Number(episodesInput.value);
+      const learningRate = Number(learningRateInput.value);
+      const discount = Number(discountInput.value);
+      const exploration = Number(explorationInput.value);
+
+      if (!Number.isInteger(episodes) || episodes < 1) {
+        return "Episodes must be an integer greater than or equal to 1.";
+      }
+      if (Number.isNaN(learningRate) || learningRate < 0 || learningRate > 1) {
+        return "Learning rate must be between 0 and 1.";
+      }
+      if (Number.isNaN(discount) || discount < 0 || discount > 1) {
+        return "Discount factor must be between 0 and 1.";
+      }
+      if (Number.isNaN(exploration) || exploration < 0 || exploration > 1) {
+        return "Exploration must be between 0 and 1.";
+      }
+      return "";
+    }
+
+    function updateProgress(current, total) {
+      episodeProgress.textContent = `${current} / ${total}`;
+      progressBar.setAttribute("aria-valuemax", String(total));
+      progressBar.setAttribute("aria-valuenow", String(current));
+      const percent = total > 0 ? Math.min(100, (current / total) * 100) : 0;
+      progressFill.style.width = `${percent}%`;
+    }
+
+    function updateMetricsSummary(rewards) {
+      if (!rewards.length) {
+        metricsSummary.textContent = "No data yet";
+        return;
+      }
+      const latest = rewards[rewards.length - 1];
+      const mean = rewards.reduce((sum, value) => sum + value, 0) / rewards.length;
+      metricsSummary.textContent = `Latest: ${latest.toFixed(2)} · Mean: ${mean.toFixed(2)} · Episodes: ${rewards.length}`;
+    }
+
+    function renderRewardChart(rewards) {
+      if (!rewards.length) {
+        rewardLine.setAttribute("points", "");
+        chartEmpty.hidden = false;
+        updateMetricsSummary(rewards);
+        return;
+      }
+
+      chartEmpty.hidden = true;
+      const width = 640;
+      const height = 240;
+      const padLeft = 48;
+      const padRight = 24;
+      const padTop = 24;
+      const padBottom = 40;
+      const plotWidth = width - padLeft - padRight;
+      const plotHeight = height - padTop - padBottom;
+      const minReward = Math.min(...rewards);
+      const maxReward = Math.max(...rewards);
+      const span = maxReward - minReward || 1;
+
+      const points = rewards.map((reward, index) => {
+        const x = padLeft + (rewards.length === 1 ? plotWidth / 2 : (index / (rewards.length - 1)) * plotWidth);
+        const y = padTop + (1 - (reward - minReward) / span) * plotHeight;
+        return `${x.toFixed(2)},${y.toFixed(2)}`;
+      });
+
+      rewardLine.setAttribute("points", points.join(" "));
+      updateMetricsSummary(rewards);
+    }
+
+    async function startTraining(event) {
+      event.preventDefault();
+      if (trainingActive) {
+        return;
+      }
+
+      const validationError = validateConfig();
+      if (validationError) {
+        setFeedback(validationError, "error");
+        setStatus("error", "Error");
+        return;
+      }
+
+      const totalEpisodes = Number(episodesInput.value);
+      trainingActive = true;
+      episodeRewards = [];
+      renderRewardChart(episodeRewards);
+      updateProgress(0, totalEpisodes);
+      setControlsDisabled(true);
+      setFeedback("", null);
+      setStatus("training", "Training");
+
+      const startResponse = await fetch("{{ url_for('api_training_start') }}", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          episodes: totalEpisodes,
+          learning_rate: learningRateInput.value,
+          discount_factor: discountInput.value,
+          exploration_probability: explorationInput.value,
+        }),
+      });
+
+      let startData = {};
+      try {
+        startData = await startResponse.json();
+      } catch (error) {
+        startData = {};
+      }
+
+      if (!startResponse.ok) {
+        setFeedback(startData.error || "Could not start training.", "error");
+        setStatus("error", "Error");
+        setControlsDisabled(false);
+        trainingActive = false;
+        return;
+      }
+
+      try {
+        for (let episode = 1; episode <= totalEpisodes; episode += 1) {
+          const response = await fetch("{{ url_for('api_training_episode') }}", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              episode,
+              total_episodes: totalEpisodes,
+            }),
+          });
+
+          let data = {};
+          try {
+            data = await response.json();
+          } catch (error) {
+            data = {};
+          }
+
+          if (!response.ok) {
+            throw new Error(data.error || "Training stopped due to an error.");
+          }
+
+          episodeRewards.push(Number(data.episode_reward));
+          updateProgress(episode, totalEpisodes);
+          renderRewardChart(episodeRewards);
+        }
+
+        setStatus("completed", "Completed");
+        setFeedback(
+          `Training finished. Completed ${totalEpisodes} episode${totalEpisodes === 1 ? "" : "s"}.`,
+          "success"
+        );
+      } catch (error) {
+        setStatus("error", "Error");
+        setFeedback(error.message || "Training failed.", "error");
+      } finally {
+        setControlsDisabled(false);
+        trainingActive = false;
+      }
+    }
+
+    updateProgress(0, Number(episodesInput.value) || 0);
+    setStatus("ready", "Ready");
+    renderRewardChart(episodeRewards);
+    form.addEventListener("submit", startTraining);
+  </script>
+{% endblock %}

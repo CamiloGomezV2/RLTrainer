@@ -1,0 +1,41 @@
+{#
+  Compact experiment context header.
+  Expects `config` with at least: environment, environment_label, agent, agent_label.
+  Optional: experiment_status, experiment_status_label
+#}
+{% set status = experiment_status|default('ready') %}
+{% set status_label = experiment_status_label|default('Ready') %}
+
+<div
+  class="experiment-context"
+  id="experiment-context"
+  role="status"
+  aria-live="polite"
+  data-environment="{{ config.environment }}"
+  data-agent="{{ config.agent }}"
+>
+  <div class="experiment-context__item">
+    <span class="experiment-context__key">Environment</span>
+    <span class="experiment-context__value font-mono" id="experiment-environment" title="{{ config.environment_label }}">
+      {{ config.environment }}
+    </span>
+  </div>
+
+  <div class="experiment-context__item">
+    <span class="experiment-context__key">Agent</span>
+    <span class="experiment-context__value" id="experiment-agent" title="{{ config.agent }}">
+      {{ config.agent_label }}
+    </span>
+  </div>
+
+  <div class="experiment-context__status">
+    <span
+      class="status-badge"
+      id="experiment-status"
+      data-state="{{ status }}"
+    >
+      <span class="status-badge__dot" aria-hidden="true"></span>
+      <span class="status-badge__label">{{ status_label }}</span>
+    </span>
+  </div>
+</div>

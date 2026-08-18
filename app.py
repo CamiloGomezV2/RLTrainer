@@ -13,11 +13,16 @@ if str(SRC) not in sys.path:
 from flask import Flask, jsonify, render_template, request, session
 
 from env_runner import (
+    DEFAULT_GAMMA,
     DEFAULT_MAX_TIMESTEPS,
+    DEFAULT_TRAINING_EPISODES,
+    apply_agent_hyperparameters,
     get_or_create_runtime,
+    get_q_table,
     invalidate_runtime,
     reset_environment,
     run_single_action,
+    run_training_episode,
     run_until_max_timesteps,
 )
 
@@ -105,6 +110,8 @@ DEFAULT_CONFIG = {
     "agent": "Q_learning",
     "learning_rate": 0.1,
     "exploration_probability": 0.1,
+    "discount_factor": DEFAULT_GAMMA,
+    "training_episodes": DEFAULT_TRAINING_EPISODES,
 }
 
 
@@ -136,7 +143,10 @@ def config_for_template(config):
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template(
+        "index.html",
+        config=config_for_template(get_config()),
+    )
 
 
 @app.route("/load")
@@ -144,7 +154,7 @@ def load():
     return render_template(
         "load.html",
         env_spaces=ENV_SPACES,
-        config=get_config(),
+        config=config_for_template(get_config()),
         default_config=DEFAULT_CONFIG,
     )
 
@@ -171,14 +181,22 @@ def api_config():
                 DEFAULT_CONFIG["exploration_probability"],
             )
         )
+        discount_factor = float(
+            data.get("discount_factor", DEFAULT_CONFIG["discount_factor"])
+        )
     except (TypeError, ValueError):
         return jsonify({"error": "Invalid hyperparameter values"}), 400
 
+    current = get_config()
     session["config"] = {
         "environment": environment,
         "agent": agent,
         "learning_rate": learning_rate,
         "exploration_probability": exploration_probability,
+        "discount_factor": discount_factor,
+        "training_episodes": current.get(
+            "training_episodes", DEFAULT_CONFIG["training_episodes"]
+        ),
     }
     invalidate_runtime(session)
     return jsonify(config_for_template(session["config"]))
@@ -253,6 +271,138 @@ def api_environment_run_action():
     return jsonify(payload)
 
 
+@app.route("/api/agent/q-table")
+def api_agent_q_table():
+    config = get_config()
+    if config["agent"] not in {"MC", "SARSA", "Q_learning"}:
+        return jsonify(
+            {
+                "error": (
+                    "Q-table analysis currently supports tabular agents "
+                    "(MC, SARSA, Q-learning)."
+                )
+            }
+        ), 400
+    try:
+        runtime = get_or_create_runtime(session, config, need_agent=True)
+        payload = get_q_table(runtime)
+    except Exception as exc:  # noqa: BLE001 - surface agent errors to the UI
+        return jsonify({"error": str(exc)}), 500
+    payload["environment"] = config["environment"]
+    payload["environment_label"] = ENV_LABELS.get(
+        config["environment"], config["environment"]
+    )
+    payload["agent"] = config["agent"]
+    payload["agent_label"] = AGENT_LABELS.get(config["agent"], config["agent"])
+    return jsonify(payload)
+
+
+@app.route("/api/training/start", methods=["POST"])
+def api_training_start():
+    config = get_config()
+    if config["agent"] not in {"MC", "SARSA", "Q_learning"}:
+        return jsonify(
+            {
+                "error": (
+                    "Training currently supports tabular agents "
+                    "(MC, SARSA, Q-learning)."
+                )
+            }
+        ), 400
+
+    data = request.get_json(silent=True) or {}
+    try:
+        episodes = int(data.get("episodes", config.get("training_episodes", DEFAULT_TRAINING_EPISODES)))
+        learning_rate = float(data.get("learning_rate", config["learning_rate"]))
+        exploration_probability = float(
+            data.get("exploration_probability", config["exploration_probability"])
+        )
+        discount_factor = float(data.get("discount_factor", config["discount_factor"]))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid training configuration values."}), 400
+
+    if episodes < 1:
+        return jsonify({"error": "Episodes must be at least 1."}), 400
+    if not 0 <= learning_rate <= 1:
+        return jsonify({"error": "Learning rate must be between 0 and 1."}), 400
+    if not 0 <= exploration_probability <= 1:
+        return jsonify({"error": "Exploration must be between 0 and 1."}), 400
+    if not 0 <= discount_factor <= 1:
+        return jsonify({"error": "Discount factor must be between 0 and 1."}), 400
+
+    session["config"] = {
+        **config,
+        "learning_rate": learning_rate,
+        "exploration_probability": exploration_probability,
+        "discount_factor": discount_factor,
+        "training_episodes": episodes,
+    }
+    invalidate_runtime(session)
+
+    try:
+        runtime = get_or_create_runtime(session, session["config"], need_agent=True)
+        apply_agent_hyperparameters(runtime, session["config"])
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 500
+
+    return jsonify(
+        {
+            "status": "ready",
+            "episodes": episodes,
+            "learning_rate": learning_rate,
+            "exploration_probability": exploration_probability,
+            "discount_factor": discount_factor,
+            "environment": session["config"]["environment"],
+            "environment_label": ENV_LABELS.get(
+                session["config"]["environment"], session["config"]["environment"]
+            ),
+            "agent": session["config"]["agent"],
+            "agent_label": AGENT_LABELS.get(
+                session["config"]["agent"], session["config"]["agent"]
+            ),
+        }
+    )
+
+
+@app.route("/api/training/episode", methods=["POST"])
+def api_training_episode():
+    config = get_config()
+    if config["agent"] not in {"MC", "SARSA", "Q_learning"}:
+        return jsonify(
+            {
+                "error": (
+                    "Training currently supports tabular agents "
+                    "(MC, SARSA, Q-learning)."
+                )
+            }
+        ), 400
+
+    data = request.get_json(silent=True) or {}
+    try:
+        episode = int(data.get("episode", 1))
+        total_episodes = int(
+            data.get("total_episodes", config.get("training_episodes", DEFAULT_TRAINING_EPISODES))
+        )
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid episode progress values."}), 400
+
+    try:
+        runtime = get_or_create_runtime(session, config, need_agent=True)
+        apply_agent_hyperparameters(runtime, config)
+        payload = run_training_episode(runtime, DEFAULT_MAX_TIMESTEPS)
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 500
+
+    payload.update(
+        {
+            "episode": episode,
+            "total_episodes": total_episodes,
+            "status": "completed" if episode >= total_episodes else "training",
+        }
+    )
+    return jsonify(payload)
+
+
 @app.route("/visualize-environment")
 def visualize_environment():
     return render_template(
@@ -263,12 +413,19 @@ def visualize_environment():
 
 @app.route("/visualize-q-table")
 def visualize_q_table():
-    return render_template("blank.html", title="Visualize Q-table")
+    return render_template(
+        "agent_analysis.html",
+        config=config_for_template(get_config()),
+    )
 
 
 @app.route("/training")
 def training():
-    return render_template("blank.html", title="Training")
+    return render_template(
+        "training.html",
+        config=config_for_template(get_config()),
+        default_episodes=DEFAULT_TRAINING_EPISODES,
+    )
 
 
 if __name__ == "__main__":

@@ -1,34 +1,63 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>RL Trainer</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-</head>
-<body>
-  <h1 class="page-title">General Page</h1>
+{% extends "base.html" %}
 
-  <div class="app-shell">
-    <aside class="sidebar">
-      <p class="brand">RL Trainer</p>
-      <nav>
-        <ul>
-          <li><a href="{{ url_for('load') }}">Load environment and agent</a></li>
-          <li><a href="{{ url_for('visualize_environment') }}">Visualize environment</a></li>
-          <li><a href="{{ url_for('visualize_q_table') }}">Visualize Q-table</a></li>
-          <li><a href="{{ url_for('training') }}">Training</a></li>
-        </ul>
-      </nav>
-    </aside>
+{% block title %}RL Trainer{% endblock %}
 
-    <main class="content">
-      <h2>Welcome!</h2>
-      <p>
-        This application allows for the visualization of reinforcement learning
-        agents in different environments.
-      </p>
-    </main>
+{% block page_header %}
+  <header class="home-hero">
+    <h1 class="home-hero__title">Welcome to RL Trainer</h1>
+    <p class="home-hero__subtitle">
+      Visualize and analyze reinforcement learning
+      agents in interactive environments.
+    </p>
+  </header>
+{% endblock %}
+
+{% block content %}
+  <div class="home-cards" role="navigation" aria-label="Main workflows">
+    <a class="home-card" href="{{ url_for('load') }}">
+      <span class="home-card__icon" aria-hidden="true">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
+          <circle cx="12" cy="12" r="3"></circle>
+        </svg>
+      </span>
+      <span class="home-card__title">Environment</span>
+      <span class="home-card__description">Configure the environment</span>
+    </a>
+
+    <a class="home-card" href="{{ url_for('visualize_environment') }}">
+      <span class="home-card__icon" aria-hidden="true">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <circle cx="12" cy="12" r="3"></circle>
+        </svg>
+      </span>
+      <span class="home-card__title">Visualization</span>
+      <span class="home-card__description">Explore agent behavior</span>
+    </a>
+
+    <a class="home-card" href="{{ url_for('visualize_q_table') }}">
+      <span class="home-card__icon" aria-hidden="true">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+          <path d="M3 9h18"></path>
+          <path d="M3 15h18"></path>
+          <path d="M9 3v18"></path>
+          <path d="M15 3v18"></path>
+        </svg>
+      </span>
+      <span class="home-card__title">Agent Analysis</span>
+      <span class="home-card__description">Inspect learned values</span>
+    </a>
+
+    <a class="home-card" href="{{ url_for('training') }}">
+      <span class="home-card__icon" aria-hidden="true">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="6 3 20 12 6 21 6 3"></polygon>
+        </svg>
+      </span>
+      <span class="home-card__title">Training</span>
+      <span class="home-card__description">Train your agent</span>
+    </a>
   </div>
-</body>
-</html>
+{% endblock %}
