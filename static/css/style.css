@@ -688,10 +688,13 @@ body {
 /* -------------------------------------------------------------------------- */
 
 .page-content:has(.viz-workspace) {
-  max-width: min(100%, 72rem);
+  max-width: min(100%, 88rem);
 }
 
-.app-main:has(.viz-workspace) > .experiment-context,
+.app-main:has(.viz-workspace) > .experiment-context {
+  max-width: min(100%, 88rem);
+}
+
 .app-main:has(.analysis-workspace) > .experiment-context {
   max-width: min(100%, 72rem);
 }
@@ -720,6 +723,25 @@ body {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-xs);
+}
+
+.viz-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.viz-toggle input {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--color-primary);
+  cursor: pointer;
 }
 
 .viz-params__item {
@@ -807,6 +829,17 @@ body {
   min-width: 0;
 }
 
+.viz-stage__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: stretch;
+}
+
+.viz-stage__row:has(.viz-qchart:not([hidden])) {
+  grid-template-columns: minmax(0, 1fr) minmax(14rem, 18rem);
+}
+
 .viz-render {
   display: flex;
   align-items: center;
@@ -822,6 +855,136 @@ body {
   position: relative;
   color: var(--color-text-secondary);
   text-align: center;
+}
+
+.viz-qchart {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 28rem;
+  padding: var(--space-4);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.viz-qchart[hidden] {
+  display: none;
+}
+
+.viz-qchart__header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.viz-qchart__title {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.viz-qchart__subtitle {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+}
+
+.viz-qchart__plot {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-around;
+  gap: var(--space-2);
+  flex: 1;
+  min-height: 16rem;
+  padding: var(--space-2) 0;
+}
+
+.viz-qchart__empty {
+  margin: auto 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+.q-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.q-bar__value {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  line-height: var(--line-height-tight);
+}
+
+.q-bar.is-greedy .q-bar__value {
+  color: var(--color-primary);
+  font-weight: var(--font-weight-semibold);
+}
+
+.q-bar__track {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  max-width: 2.25rem;
+  background-color: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.q-bar__zero {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background-color: var(--color-border-strong);
+  pointer-events: none;
+}
+
+.q-bar__fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-radius: 2px;
+  min-height: 2px;
+}
+
+.q-bar__fill.is-positive {
+  background-color: var(--color-primary);
+}
+
+.q-bar__fill.is-negative {
+  background-color: var(--color-danger);
+}
+
+.q-bar.is-greedy .q-bar__fill.is-positive {
+  background-color: var(--color-primary-hover);
+}
+
+.q-bar__label {
+  font-size: 0.7rem;
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  text-align: center;
+  line-height: var(--line-height-tight);
+  word-break: break-word;
+}
+
+.q-bar.is-greedy .q-bar__label {
+  color: var(--color-primary);
+  font-weight: var(--font-weight-semibold);
 }
 
 .viz-render-placeholder {
@@ -1447,11 +1610,20 @@ body {
     grid-template-columns: 1fr;
   }
 
-  .viz-render {
+  .viz-stage__row:has(.viz-qchart:not([hidden])) {
+    grid-template-columns: 1fr;
+  }
+
+  .viz-render,
+  .viz-qchart {
     min-height: 20rem;
   }
 
   .viz-sidebar {
     order: 2;
+  }
+
+  .viz-toggle {
+    margin-left: 0;
   }
 }

@@ -6,7 +6,8 @@ import base64
 import atexit
 import io
 import secrets
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 import gymnasium as gym
 import numpy as np
@@ -43,11 +44,85 @@ def ensure_session_id(session) -> str:
     return session["sid"]
 
 
+def _copy_learned_state(agent) -> dict[str, Any] | None:
+    """Snapshot Q, policy, and visit counts so visualization cannot learn."""
+    if agent is None:
+        return None
+    snapshot: dict[str, Any] = {}
+    if hasattr(agent, "Q"):
+        snapshot["Q"] = np.array(agent.Q, copy=True)
+    if hasattr(agent, "policy"):
+        snapshot["policy"] = np.array(agent.policy, copy=True)
+    if hasattr(agent, "N"):
+        snapshot["N"] = np.array(agent.N, copy=True)
+    return snapshot
+
+
+def _restore_learned_state(agent, snapshot: dict[str, Any] | None) -> None:
+    if agent is None or snapshot is None:
+        return
+    if "Q" in snapshot and hasattr(agent, "Q"):
+        q_table = agent.Q
+        if isinstance(q_table, np.ndarray) and q_table.shape == snapshot["Q"].shape:
+            q_table[...] = snapshot["Q"]
+        else:
+            agent.Q = np.array(snapshot["Q"], copy=True)
+    if "policy" in snapshot and hasattr(agent, "policy"):
+        policy = agent.policy
+        if isinstance(policy, np.ndarray) and policy.shape == snapshot["policy"].shape:
+            policy[...] = snapshot["policy"]
+        else:
+            agent.policy = np.array(snapshot["policy"], copy=True)
+    if "N" in snapshot and hasattr(agent, "N"):
+        visits = agent.N
+        if isinstance(visits, np.ndarray) and visits.shape == snapshot["N"].shape:
+            visits[...] = snapshot["N"]
+        else:
+            agent.N = np.array(snapshot["N"], copy=True)
+
+
+@contextmanager
+def _without_learning(agent) -> Iterator[None]:
+    snapshot = _copy_learned_state(agent)
+    try:
+        yield
+    finally:
+        _restore_learned_state(agent, snapshot)
+
+
+def _reset_agent_knowledge(agent) -> None:
+    """Zero learned values (Q-table / policy) if the agent supports it."""
+    if agent is None:
+        return
+    reset = getattr(agent, "reset", None)
+    if callable(reset):
+        reset()
+        return
+    if hasattr(agent, "Q"):
+        agent.Q = np.zeros_like(np.asarray(agent.Q), dtype=float)
+
+
 def invalidate_runtime(session) -> None:
     sid = session.get("sid")
-    if sid and sid in _RUNTIMES:
-        runtime = _RUNTIMES.pop(sid)
-        _close_env(runtime.get("env"))
+    if not sid:
+        return
+    runtime = _RUNTIMES.pop(sid, None)
+    if runtime is None:
+        return
+    _reset_agent_knowledge(runtime.get("agent"))
+    _close_env(runtime.get("env"))
+
+
+def reset_experiment_runtime(session) -> None:
+    """
+    Discard the current environment/agent so the next use starts from scratch.
+
+    Applying configuration must leave the Q-table at 0 even if the environment,
+    agent, and hyperparameters did not change.
+    """
+    session["runtime_generation"] = int(session.get("runtime_generation", 0)) + 1
+    session.modified = True
+    invalidate_runtime(session)
 
 
 def close_all_runtimes() -> None:
@@ -115,6 +190,48 @@ def encode_observation(observation, space) -> int:
     )
 
 
+def _state_q_values(runtime: dict[str, Any], observation: Any = None) -> dict | None:
+    """Return Q(s, a) for every action using the same table as /api/agent/q-table."""
+    env = runtime.get("env")
+    try:
+        table = get_q_table(runtime)
+    except ValueError:
+        return None
+    if env is None:
+        return None
+
+    q_table = np.asarray(table["q_table"], dtype=float)
+    if q_table.ndim != 2:
+        return None
+
+    if observation is None:
+        agent = runtime.get("agent")
+        if not getattr(agent, "states", None):
+            return None
+        state = int(agent.states[-1])
+    elif isinstance(observation, (int, np.integer)):
+        state = int(observation)
+    else:
+        try:
+            state = encode_observation(observation, env.observation_space)
+        except (ValueError, TypeError, AttributeError):
+            return None
+
+    if state < 0 or state >= q_table.shape[0]:
+        return None
+
+    values = q_table[state]
+    max_q = float(np.max(values))
+    greedy_actions = [
+        int(action) for action, value in enumerate(values) if float(value) == max_q
+    ]
+    return {
+        "state_index": state,
+        "values": [float(value) for value in values],
+        "greedy_actions": greedy_actions,
+    }
+
+
 def create_agent(agent_name: str, env: gym.Env, config: dict):
     if agent_name not in TABULAR_AGENTS:
         raise ValueError(
@@ -143,6 +260,7 @@ def get_or_create_runtime(session, config: dict, need_agent: bool = False) -> di
         float(config["learning_rate"]),
         float(config["exploration_probability"]),
         float(config.get("discount_factor", DEFAULT_GAMMA)),
+        int(session.get("runtime_generation", 0)),
     )
 
     if runtime is not None and runtime.get("fingerprint") == fingerprint:
@@ -151,6 +269,7 @@ def get_or_create_runtime(session, config: dict, need_agent: bool = False) -> di
         return runtime
 
     if runtime is not None:
+        _reset_agent_knowledge(runtime.get("agent"))
         _close_env(runtime.get("env"))
 
     env = gym.make(config["environment"], render_mode="rgb_array")
@@ -194,6 +313,7 @@ def reset_environment(runtime: dict[str, Any], seed: int | None = 0) -> dict:
         "timestep": 0,
         "max_timesteps": DEFAULT_MAX_TIMESTEPS,
         "accumulated_reward": 0.0,
+        "q_values": _state_q_values(runtime, observation),
     }
 
 
@@ -226,117 +346,152 @@ def _resolve_action(runtime: dict[str, Any], action_choice: Any):
 
 
 def run_single_action(runtime: dict[str, Any], action_choice: Any = "policy") -> dict:
-    """Take one environment step using the selected action (or the agent policy)."""
+    """Take one environment step without updating the Q-table."""
     env = runtime["env"]
     agent = runtime.get("agent")
 
     if agent is None:
         raise ValueError("Run an action currently requires a tabular agent.")
 
-    # Start a fresh episode if needed or if the timestep budget was exhausted.
-    if not agent.states or runtime.get("timestep", 0) >= DEFAULT_MAX_TIMESTEPS:
-        reset_environment(runtime, seed=None)
+    with _without_learning(agent):
+        # Start a fresh episode if needed or if the timestep budget was exhausted.
+        if not agent.states or runtime.get("timestep", 0) >= DEFAULT_MAX_TIMESTEPS:
+            reset_environment(runtime, seed=None)
 
-    action = _resolve_action(runtime, action_choice)
-    agent.actions.append(action if isinstance(action, (int, np.integer)) else int(action))
+        action = _resolve_action(runtime, action_choice)
+        agent.actions.append(
+            action if isinstance(action, (int, np.integer)) else int(action)
+        )
 
-    observation, reward, terminated, truncated, info = env.step(action)
-    done = bool(terminated or truncated)
-    next_state = encode_observation(observation, env.observation_space)
+        observation, reward, terminated, truncated, info = env.step(action)
+        done = bool(terminated or truncated)
+        next_state = encode_observation(observation, env.observation_space)
 
-    agent.update(next_state, reward, done)
-    agent.rewards.append(reward)
-    agent.dones.append(done)
+        agent.rewards.append(reward)
+        agent.dones.append(done)
 
-    runtime["timestep"] = int(runtime.get("timestep", 0)) + 1
-    runtime["accumulated_reward"] = float(runtime.get("accumulated_reward", 0.0)) + float(reward)
+        runtime["timestep"] = int(runtime.get("timestep", 0)) + 1
+        runtime["accumulated_reward"] = float(
+            runtime.get("accumulated_reward", 0.0)
+        ) + float(reward)
 
-    frame = env.render()
+        frame = env.render()
+        image = _frame_to_data_url(frame)
+        serialized_observation = _serialize_observation(observation)
+        serialized_action = (
+            int(action)
+            if isinstance(action, (int, np.integer))
+            else _serialize_observation(action)
+        )
+        next_image = None
+        next_observation = None
+        if done:
+            observation, info = env.reset()
+            agent.restart()
+            state = encode_observation(observation, env.observation_space)
+            agent.states.append(state)
+            runtime["accumulated_reward"] = 0.0
+            next_image = _frame_to_data_url(env.render())
+            next_observation = _serialize_observation(observation)
+        else:
+            agent.states.append(next_state)
+
     payload = {
         "timestep": runtime["timestep"],
         "max_timesteps": DEFAULT_MAX_TIMESTEPS,
         "accumulated_reward": runtime["accumulated_reward"],
         "reward": float(reward),
         "done": done,
-        "action": int(action) if isinstance(action, (int, np.integer)) else _serialize_observation(action),
-        "image": _frame_to_data_url(frame),
-        "observation": _serialize_observation(observation),
+        "action": serialized_action,
+        "image": image,
+        "observation": serialized_observation,
+        "q_values": _state_q_values(runtime, serialized_observation),
+        "reset_after_done": done,
     }
-
     if done:
-        observation, info = env.reset()
-        agent.restart()
-        state = encode_observation(observation, env.observation_space)
-        agent.states.append(state)
-        runtime["accumulated_reward"] = 0.0
-        payload["reset_after_done"] = True
-        payload["next_image"] = _frame_to_data_url(env.render())
-        payload["next_observation"] = _serialize_observation(observation)
-    else:
-        agent.states.append(next_state)
-        payload["reset_after_done"] = False
-
+        payload["next_image"] = next_image
+        payload["next_observation"] = next_observation
+        payload["next_q_values"] = _state_q_values(runtime, next_observation)
     return payload
 
 
-def run_until_max_timesteps(runtime: dict[str, Any], max_timesteps: int = DEFAULT_MAX_TIMESTEPS) -> dict:
+def run_until_max_timesteps(
+    runtime: dict[str, Any],
+    max_timesteps: int = DEFAULT_MAX_TIMESTEPS,
+    action_choice: Any = "policy",
+) -> dict:
     """
-    Run up to max_timesteps environment steps with the selected tabular agent.
-    When an episode ends (terminated or truncated), restart the env and agent episode buffers.
+    Run up to max_timesteps environment steps without learning.
+
+    Uses the selected action (or the frozen agent policy) at every step.
+    When an episode ends (terminated or truncated), restart the env and agent
+    episode buffers. The Q-table is not modified.
     """
     env = runtime["env"]
     agent = runtime.get("agent")
     if agent is None:
         raise ValueError("No tabular agent is available for this configuration.")
 
-    initial = reset_environment(runtime, seed=None)
-    frames = [
-        {
-            "timestep": 0,
-            "accumulated_reward": 0.0,
-            "reward": 0.0,
-            "done": False,
-            "image": initial["image"],
-            "observation": initial["observation"],
-        }
-    ]
-
-    accumulated_reward = 0.0
-
-    for timestep in range(1, max_timesteps + 1):
-        action = agent.make_decision()
-        agent.actions.append(action)
-
-        observation, reward, terminated, truncated, info = env.step(action)
-        done = bool(terminated or truncated)
-        next_state = encode_observation(observation, env.observation_space)
-
-        agent.update(next_state, reward, done)
-        agent.rewards.append(reward)
-        agent.dones.append(done)
-
-        accumulated_reward += float(reward)
-        frame = env.render()
-        frames.append(
+    with _without_learning(agent):
+        initial = reset_environment(runtime, seed=None)
+        frames = [
             {
-                "timestep": timestep,
-                "accumulated_reward": accumulated_reward,
-                "reward": float(reward),
-                "done": done,
-                "action": int(action),
-                "image": _frame_to_data_url(frame),
-                "observation": _serialize_observation(observation),
+                "timestep": 0,
+                "accumulated_reward": 0.0,
+                "reward": 0.0,
+                "done": False,
+                "image": initial["image"],
+                "observation": initial["observation"],
+                "q_values": None,
             }
-        )
+        ]
 
-        if done:
-            observation, info = env.reset()
-            agent.restart()
-            state = encode_observation(observation, env.observation_space)
-            agent.states.append(state)
-            accumulated_reward = 0.0
-        else:
-            agent.states.append(next_state)
+        accumulated_reward = 0.0
+
+        for timestep in range(1, max_timesteps + 1):
+            action = _resolve_action(runtime, action_choice)
+            agent.actions.append(
+                action if isinstance(action, (int, np.integer)) else int(action)
+            )
+
+            observation, reward, terminated, truncated, info = env.step(action)
+            done = bool(terminated or truncated)
+            next_state = encode_observation(observation, env.observation_space)
+
+            agent.rewards.append(reward)
+            agent.dones.append(done)
+
+            accumulated_reward += float(reward)
+            serialized_observation = _serialize_observation(observation)
+            frame = env.render()
+            frames.append(
+                {
+                    "timestep": timestep,
+                    "accumulated_reward": accumulated_reward,
+                    "reward": float(reward),
+                    "done": done,
+                    "action": int(action)
+                    if isinstance(action, (int, np.integer))
+                    else serialized_observation,
+                    "image": _frame_to_data_url(frame),
+                    "observation": serialized_observation,
+                    "q_values": None,
+                }
+            )
+
+            if done:
+                observation, info = env.reset()
+                agent.restart()
+                state = encode_observation(observation, env.observation_space)
+                agent.states.append(state)
+                accumulated_reward = 0.0
+            else:
+                agent.states.append(next_state)
+
+    for frame_payload in frames:
+        frame_payload["q_values"] = _state_q_values(
+            runtime, frame_payload["observation"]
+        )
 
     runtime["timestep"] = max_timesteps
     runtime["accumulated_reward"] = frames[-1]["accumulated_reward"]
@@ -392,8 +547,8 @@ def run_training_episode(
     """
     Run one training episode with the tabular agent.
 
-    Uses the same decision / step / update flow as the existing visualization
-    runners, without collecting render frames.
+    Uses the agent's policy, steps the environment, and updates Q-values.
+    Visualization runners do not learn; only this training path does.
     """
     env = runtime["env"]
     agent = runtime.get("agent")

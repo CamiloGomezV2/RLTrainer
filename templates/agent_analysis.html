@@ -293,7 +293,9 @@
       setStatus("Loading Q-table…", "info");
       tableShell.hidden = true;
 
-      const response = await fetch("{{ url_for('api_agent_q_table') }}");
+      const response = await fetch("{{ url_for('api_agent_q_table') }}", {
+        cache: "no-store",
+      });
       let data = {};
       try {
         data = await response.json();

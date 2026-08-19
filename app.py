@@ -19,8 +19,8 @@ from env_runner import (
     apply_agent_hyperparameters,
     get_or_create_runtime,
     get_q_table,
-    invalidate_runtime,
     reset_environment,
+    reset_experiment_runtime,
     run_single_action,
     run_training_episode,
     run_until_max_timesteps,
@@ -28,6 +28,14 @@ from env_runner import (
 
 app = Flask(__name__)
 app.secret_key = "rl-trainer-dev-secret"
+
+
+@app.after_request
+def _disable_api_caching(response):
+    if request.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+    return response
 
 ENV_LABELS = {
     "Blackjack-v1": "Blackjack",
@@ -198,14 +206,14 @@ def api_config():
             "training_episodes", DEFAULT_CONFIG["training_episodes"]
         ),
     }
-    invalidate_runtime(session)
+    reset_experiment_runtime(session)
     return jsonify(config_for_template(session["config"]))
 
 
 @app.route("/api/config/reset", methods=["POST"])
 def api_config_reset():
     session["config"] = dict(DEFAULT_CONFIG)
-    invalidate_runtime(session)
+    reset_experiment_runtime(session)
     return jsonify(config_for_template(session["config"]))
 
 
@@ -237,9 +245,16 @@ def api_environment_run_episode():
                 )
             }
         ), 400
+    data = request.get_json(silent=True) or {}
+    action_choice = data.get("action", "policy")
+    if action_choice == "manual":
+        action_choice = data.get("manual_action")
+
     try:
         runtime = get_or_create_runtime(session, config, need_agent=True)
-        payload = run_until_max_timesteps(runtime, DEFAULT_MAX_TIMESTEPS)
+        payload = run_until_max_timesteps(
+            runtime, DEFAULT_MAX_TIMESTEPS, action_choice
+        )
     except Exception as exc:  # noqa: BLE001 - surface Gymnasium / agent errors to the UI
         return jsonify({"error": str(exc)}), 500
     return jsonify(payload)
@@ -337,7 +352,7 @@ def api_training_start():
         "discount_factor": discount_factor,
         "training_episodes": episodes,
     }
-    invalidate_runtime(session)
+    reset_experiment_runtime(session)
 
     try:
         runtime = get_or_create_runtime(session, session["config"], need_agent=True)

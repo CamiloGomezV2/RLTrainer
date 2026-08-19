@@ -22,13 +22,30 @@
         <span class="viz-params__label">Exploration</span>
         <strong id="config-eps">{{ config.exploration_probability }}</strong>
       </div>
+      <label class="viz-toggle" for="show-q-values">
+        <input type="checkbox" id="show-q-values" checked>
+        <span>Show Q values</span>
+      </label>
     </div>
 
     <div class="viz-layout">
       <section class="viz-stage" aria-label="Environment visualization">
-        <div class="viz-render" id="env-render">
-          <span class="viz-render-placeholder">Loading environment…</span>
-          <img id="env-frame" class="viz-frame" alt="Environment render" hidden>
+        <div class="viz-stage__row">
+          <div class="viz-render" id="env-render">
+            <span class="viz-render-placeholder">Loading environment…</span>
+            <img id="env-frame" class="viz-frame" alt="Environment render" hidden>
+          </div>
+
+          <aside class="viz-qchart" id="q-chart-panel" aria-labelledby="q-chart-title">
+            <header class="viz-qchart__header">
+              <h2 class="viz-qchart__title" id="q-chart-title">Q values</h2>
+              <p class="viz-qchart__subtitle" id="q-chart-subtitle">Current state</p>
+            </header>
+            <div class="viz-qchart__plot" id="q-chart-plot" role="img" hidden></div>
+            <p class="viz-qchart__empty" id="q-chart-empty">
+              Q values are not available for this agent or state.
+            </p>
+          </aside>
         </div>
 
         <div class="viz-toolbar">
@@ -128,12 +145,20 @@
     const runActionButton = document.getElementById("run-action");
     const prevFrameButton = document.getElementById("prev-frame");
     const nextFrameButton = document.getElementById("next-frame");
+    const showQValues = document.getElementById("show-q-values");
+    const qChartPanel = document.getElementById("q-chart-panel");
+    const qChartPlot = document.getElementById("q-chart-plot");
+    const qChartEmpty = document.getElementById("q-chart-empty");
+    const qChartSubtitle = document.getElementById("q-chart-subtitle");
     const FRAME_DELAY_MS = 120;
 
     let animationTimer = null;
     let episodeFrames = [];
     let frameIndex = -1;
     let maxTimesteps = config.max_timesteps || 100;
+    let latestQValues = null;
+    let agentQTable = null;
+    let lastStateIndex = null;
 
     function setRunStatus(state, label) {
       if (window.ExperimentContext) {
@@ -177,6 +202,153 @@
         return `+${value}`;
       }
       return String(value);
+    }
+
+    function formatQ(value) {
+      const number = Number(value);
+      if (Number.isNaN(number)) {
+        return "—";
+      }
+      if (Object.is(number, -0)) {
+        return "0.00";
+      }
+      const abs = Math.abs(number);
+      if (abs !== 0 && abs < 0.01) {
+        return number.toExponential(1);
+      }
+      return number.toFixed(2);
+    }
+
+    function actionLabel(index) {
+      const labels = ACTION_LABELS[config.environment] || [];
+      if (labels[index] !== undefined) {
+        return labels[index];
+      }
+      return `A${index}`;
+    }
+
+    function stateIndexFromPayload(payload) {
+      if (payload && payload.q_values && Number.isInteger(payload.q_values.state_index)) {
+        return payload.q_values.state_index;
+      }
+      if (payload && Number.isInteger(payload.observation)) {
+        return payload.observation;
+      }
+      return null;
+    }
+
+    async function loadAgentQTable() {
+      const response = await fetch("{{ url_for('api_agent_q_table') }}", {
+        cache: "no-store",
+      });
+      const data = await response.json();
+      if (!response.ok || !Array.isArray(data.q_table)) {
+        agentQTable = null;
+        return;
+      }
+      agentQTable = data.q_table;
+    }
+
+    function qChartFromAgent(stateIndex) {
+      lastStateIndex = stateIndex;
+      if (!agentQTable || !Number.isInteger(stateIndex) || !agentQTable[stateIndex]) {
+        renderQChart(null);
+        return;
+      }
+      const row = agentQTable[stateIndex];
+      const numbers = row.map(Number);
+      let best = -Infinity;
+      numbers.forEach((value) => {
+        if (!Number.isNaN(value) && value > best) {
+          best = value;
+        }
+      });
+      const greedy = numbers
+        .map((value, index) => (value === best ? index : -1))
+        .filter((index) => index >= 0);
+      renderQChart({
+        state_index: stateIndex,
+        values: row,
+        greedy_actions: greedy,
+      });
+    }
+
+    function renderQChart(qPayload) {
+      if (qPayload !== undefined) {
+        latestQValues = qPayload;
+      }
+
+      if (!showQValues.checked) {
+        qChartPanel.hidden = true;
+        return;
+      }
+
+      qChartPanel.hidden = false;
+      const values = latestQValues && Array.isArray(latestQValues.values)
+        ? latestQValues.values.map(Number)
+        : [];
+
+      if (!values.length || values.some((value) => Number.isNaN(value))) {
+        qChartPlot.hidden = true;
+        qChartPlot.innerHTML = "";
+        qChartEmpty.hidden = false;
+        qChartSubtitle.textContent = "Current state";
+        return;
+      }
+
+      const greedy = new Set(latestQValues.greedy_actions || []);
+      const minValue = Math.min(0, ...values);
+      const maxValue = Math.max(0, ...values);
+      const span = Math.max(maxValue - minValue, 1e-9);
+      const zeroPercent = ((0 - minValue) / span) * 100;
+      const stateIndex = latestQValues.state_index;
+      qChartSubtitle.textContent = Number.isInteger(stateIndex)
+        ? `State ${stateIndex}`
+        : "Current state";
+
+      qChartEmpty.hidden = true;
+      qChartPlot.hidden = false;
+      qChartPlot.replaceChildren();
+      qChartPlot.setAttribute(
+        "aria-label",
+        `Q values for ${values.map((value, index) => `${actionLabel(index)} ${formatQ(value)}`).join(", ")}`
+      );
+
+      values.forEach((value, index) => {
+        const heightPercent = (Math.abs(value) / span) * 100;
+        const isNegative = value < 0;
+        const column = document.createElement("div");
+        column.className = "q-bar";
+        if (greedy.has(index)) {
+          column.classList.add("is-greedy");
+        }
+
+        const valueLabel = document.createElement("span");
+        valueLabel.className = "q-bar__value";
+        valueLabel.textContent = formatQ(value);
+
+        const track = document.createElement("div");
+        track.className = "q-bar__track";
+
+        const zeroLine = document.createElement("div");
+        zeroLine.className = "q-bar__zero";
+        zeroLine.style.bottom = `${zeroPercent}%`;
+
+        const fill = document.createElement("div");
+        fill.className = isNegative ? "q-bar__fill is-negative" : "q-bar__fill is-positive";
+        fill.style.height = `${heightPercent}%`;
+        fill.style.bottom = isNegative
+          ? `${Math.max(zeroPercent - heightPercent, 0)}%`
+          : `${zeroPercent}%`;
+
+        const name = document.createElement("span");
+        name.className = "q-bar__label";
+        name.textContent = actionLabel(index);
+
+        track.append(zeroLine, fill);
+        column.append(valueLabel, track, name);
+        qChartPlot.appendChild(column);
+      });
     }
 
     function selectedActionPayload() {
@@ -274,6 +446,7 @@
       infoState.textContent = formatObservation(payload.observation);
       infoAction.textContent = formatAction(payload.action);
       infoReward.textContent = formatReward(payload.reward);
+      qChartFromAgent(stateIndexFromPayload(payload));
     }
 
     function showFrameAt(index) {
@@ -330,6 +503,7 @@
       }
       episodeFrames = [];
       frameIndex = -1;
+      await loadAgentQTable();
       updateInfo({
         ...data,
         action: null,
@@ -352,6 +526,7 @@
       const response = await fetch("{{ url_for('api_environment_run_episode') }}", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(selectedActionPayload()),
       });
       const data = await response.json();
       if (!response.ok) {
@@ -363,6 +538,7 @@
         return;
       }
       maxTimesteps = data.max_timesteps || maxTimesteps;
+      await loadAgentQTable();
       playFrames(data.frames);
     }
 
@@ -386,12 +562,14 @@
 
       episodeFrames = [];
       frameIndex = -1;
+      await loadAgentQTable();
       updateInfo(data);
       showFrame(data.image);
       updateStepper();
 
       if (data.reset_after_done && data.next_image) {
-        setTimeout(() => {
+        setTimeout(async () => {
+          await loadAgentQTable();
           updateInfo({
             timestep: data.timestep,
             max_timesteps: data.max_timesteps,
@@ -399,6 +577,7 @@
             observation: data.next_observation,
             action: null,
             reward: null,
+            q_values: data.next_q_values,
           });
           showFrame(data.next_image);
           setRunStatus("ready", "Ready");
@@ -421,6 +600,7 @@
     runActionButton.addEventListener("click", runAction);
     prevFrameButton.addEventListener("click", () => showFrameAt(frameIndex - 1));
     nextFrameButton.addEventListener("click", () => showFrameAt(frameIndex + 1));
+    showQValues.addEventListener("change", () => qChartFromAgent(lastStateIndex));
     loadInitialState();
   </script>
 {% endblock %}
